@@ -9,31 +9,56 @@ plugins {
 group = 'playproject'
 version = '0.0.1-SNAPSHOT'
 
+repositories {
+	mavenCentral()
+}
+
 bootJar {
 	enabled = false
 }
 
-allprojects {
+subprojects {
+	group = 'playproject'
+	version = '0.0.1-SNAPSHOT'
+
 	apply plugin: 'java'
 	apply plugin: 'idea'
 	apply plugin: 'java-library'
 	apply plugin: 'io.spring.dependency-management'
 	apply plugin: 'org.springframework.boot'
 
-	group 'playproject'
-	version '1.0-SNAPSHOT'
-	ext {
-		set('springCloudVersion', 'Greenwich.RELEASE')
-		set('springCloudStreamVersion', 'Fishtown.RELEASE')
-		set('kafkaVersion', '2.1.0')
-		set('awsSDKVersion', '1.11.454')
-	}
+	sourceCompatibility = 1.12
+	targetCompatibility = 1.12
 
 	repositories {
 		mavenCentral()
 	}
 
+	ext {
+		set('springCloudVersion', 'Greenwich.RELEASE')
+		set('springCloudStreamVersion', 'Germantown.RELEASE')
+		set('kafkaVersion', '2.1.0')
+	}
+
+	dependencyManagement {
+		imports {
+			mavenBom("org.springframework.cloud:spring-cloud-stream-dependencies:${springCloudStreamVersion}")
+		}
+
+		dependencies {
+			dependencySet(group: 'org.apache.kafka', version: "${kafkaVersion}"){
+				entry 'kafka-clients'
+				entry 'kafka-streams'
+				entry 'kafka_2.11'
+				entry 'connect-api'
+				entry 'connect-json'
+				entry 'kafka-streams-test-utils'
+			}
+		}
+	}
+
 	dependencies {
+		api('org.springframework:spring-messaging')
 		annotationProcessor 'org.projectlombok:lombok:1.18.6'
 		compileOnly ('org.projectlombok:lombok:1.18.6')
 		implementation 'org.springframework.boot:spring-boot-starter-web'
@@ -46,5 +71,12 @@ allprojects {
 		testImplementation('org.hamcrest:hamcrest:2.1')
 		testImplementation('org.mockito:mockito-core')
 		testImplementation('org.mockito:mockito-junit-jupiter')
+	}
+
+	test {
+		useJUnitPlatform ()
+		testLogging {
+			events "passed", "skipped", "failed"
+		}
 	}
 }

@@ -1,0 +1,11 @@
+bootJar {
+    archiveFileName = "text-monitor.jar"
+}
+
+dependencies {
+    implementation project(':infrastructure')
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka'
+    implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka-streams'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}

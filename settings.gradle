@@ -5,4 +5,6 @@ pluginManagement {
 }
 rootProject.name = 'spring-kafka-word-count'
 
-include 'textinput'
+include 'text-input'
+include 'infrastructure'
+include 'text-event-monitor'
