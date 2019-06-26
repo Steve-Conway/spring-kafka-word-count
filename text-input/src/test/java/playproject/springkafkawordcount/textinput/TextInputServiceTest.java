@@ -9,7 +9,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.support.GenericMessage;
-import playproject.springkafkawordcount.infrastructure.model.event.TextEvent;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -25,7 +24,7 @@ class TextInputServiceTest {
     private MessageChannel textInputChannel;
 
     @Captor
-    private ArgumentCaptor<GenericMessage<TextEvent>> messageCaptor;
+    private ArgumentCaptor<GenericMessage<String>> messageCaptor;
 
     @Test
     @DisplayName("Text input accepts text")
@@ -36,7 +35,7 @@ class TextInputServiceTest {
         textInputService.textInput("one two");
 
         verify(textInputChannel).send(messageCaptor.capture());
-        assertThat(messageCaptor.getValue().getPayload().getPayload(), is("one two"));
+        assertThat(messageCaptor.getValue().getPayload(), is("one two"));
     }
 
     @Test

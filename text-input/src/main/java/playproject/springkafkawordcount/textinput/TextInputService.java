@@ -8,7 +8,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
-import playproject.springkafkawordcount.infrastructure.model.event.TextEvent;
 
 @RequestMapping
 @Slf4j
@@ -27,7 +26,7 @@ public class TextInputService {
         if (text == null || text.isBlank()) {
             throw new EmptyTextInputException();
         }
-        textEvents.send(new GenericMessage<>(new TextEvent(text)));
+        textEvents.send(new GenericMessage<>(text));
     }
 
     @ResponseStatus(value=HttpStatus.BAD_REQUEST,reason="Empty text input is not valid")
