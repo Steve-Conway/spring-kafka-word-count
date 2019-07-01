@@ -1,0 +1,29 @@
+bootJar {
+    enabled = false
+}
+
+jar {
+    enabled = true
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka'
+    implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka-streams'
+    implementation 'org.springframework.boot:spring-boot-starter-test'
+
+    implementation 'org.junit.jupiter:junit-jupiter:5.4.+'
+    implementation 'org.hamcrest:hamcrest:2.1'
+    implementation 'org.mockito:mockito-core'
+    implementation 'org.mockito:mockito-junit-jupiter'
+
+    implementation "org.apache.kafka:kafka_2.11"
+    implementation 'org.springframework.kafka:spring-kafka-test'
+    implementation 'org.springframework.cloud:spring-cloud-starter-zookeeper-discovery'
+
+    implementation 'commons-io:commons-io:2.6'
+
+    api "org.springframework.cloud:spring-cloud-starter-aws"
+    api "org.springframework.cloud:spring-cloud-starter-aws-messaging"
+}
