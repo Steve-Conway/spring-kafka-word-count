@@ -1,111 +1,263 @@
 package playproject.springkafkawordcount.wordcount;
 
-import org.apache.kafka.streams.state.QueryableStoreTypes;
+import org.apache.kafka.streams.KeyValue;
+import org.apache.kafka.streams.kstream.Windowed;
+import org.apache.kafka.streams.kstream.internals.TimeWindow;
+import org.apache.kafka.streams.state.KeyValueIterator;
+import org.apache.kafka.streams.state.QueryableStoreType;
 import org.apache.kafka.streams.state.ReadOnlyKeyValueStore;
+import org.apache.kafka.streams.state.ReadOnlyWindowStore;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.domain.EntityScan;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.cloud.aws.autoconfigure.context.ContextResourceLoaderAutoConfiguration;
-import org.springframework.cloud.aws.autoconfigure.context.ContextStackAutoConfiguration;
-import org.springframework.cloud.aws.autoconfigure.messaging.MessagingAutoConfiguration;
-import org.springframework.cloud.stream.annotation.EnableBinding;
-import org.springframework.cloud.stream.annotation.Output;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cloud.stream.binder.kafka.streams.InteractiveQueryService;
-import org.springframework.context.annotation.Import;
-import org.springframework.kafka.test.context.EmbeddedKafka;
-import org.springframework.messaging.MessageChannel;
-import org.springframework.messaging.support.GenericMessage;
-import playproject.springkafkawordcount.AbstractKafkaTest;
-import playproject.springkafkawordcount.KafkaNullConfiguration;
-import playproject.springkafkawordcount.infrastructure.model.event.TextEvent;
-import playproject.springkafkawordcount.wordcount.spring.WordCountProcessorBinding;
-import playproject.springkafkawordcount.wordcount.spring.WordCountProcessorConfiguration;
+import playproject.springkafkawordcount.infrastructure.model.WordCount;
+import playproject.springkafkawordcount.wordcount.WordCountProcessor.NoStoreException;
 
-import java.time.Duration;
+import java.util.List;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.collection.IsEmptyCollection.empty;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.when;
+import static playproject.springkafkawordcount.wordcount.WordCountProcessor.WINDOWED_WORD_COUNT_STORE;
 import static playproject.springkafkawordcount.wordcount.WordCountProcessor.WORD_COUNT_STORE;
 
-@EnableAutoConfiguration(exclude = {MessagingAutoConfiguration.class
-        , ContextStackAutoConfiguration.class
-        , ContextResourceLoaderAutoConfiguration.class
-})
-@EmbeddedKafka(partitions = 1
-        ,topics = {"textInput", "wordCount", "windowedWordCount"})
-@SpringBootTest(classes = WordCountProcessorTest.TestConfiguration.class
-        , properties = {
-        "word-count-processor.window-duration-secs=2"
-        ,"spring.cloud.stream.bindings.test-text-input.destination=textInput"
-        ,"spring.cloud.stream.kafka.streams.bindings.test-text-input.consumer.application-id=WordCountProcessorTest"
-        ,"spring.cloud.stream.bindings.test-text-input.binder=kafka"
-        ,"spring.cloud.stream.kafka.streams.binder.configuration.default.key.serde=org.apache.kafka.common.serialization.Serdes$StringSerde"
-        ,"spring.cloud.stream.kafka.streams.binder.configuration.default.value.serde=org.apache.kafka.common.serialization.Serdes$StringSerde"
-        ,"spring.cloud.zookeeper.discovery.instance-port=80"
-        })
-class WordCountProcessorTest extends AbstractKafkaTest {
+@DisplayName("Word count processor tests")
+@ExtendWith(MockitoExtension.class)
+class WordCountProcessorTest {
 
-    @Autowired
-    @Qualifier("test-text-input")
-    private
-    MessageChannel textInput;
+    private static final int WINDOW_DURATION_SECS = 30;
+    private static final TimeWindow TIME_WINDOW = new TimeWindow(1000000L, 1030000L);
 
-    @Autowired
+    @Mock
     private InteractiveQueryService interactiveQueryService;
 
+    @Mock
+    private ReadOnlyKeyValueStore<String, Long> readOnlyKeyValueStore;
+
+    @Mock
+    private ReadOnlyWindowStore<String, Long> readOnlyWindowStore;
+
+    private WordCountProcessor wordCountProcessor;
+
+    @BeforeEach
+    void init() {
+        wordCountProcessor = new WordCountProcessor(WINDOW_DURATION_SECS, interactiveQueryService);
+    }
+
     @Test
-    void process() {
+    @DisplayName("Given no store then wordcount query for all words throws NoStoreException")
+    void givenNoStoreThenWordCountQueryForAllWordsThrowsNoStoreException() {
 
-        var wordCountStore = interactiveQueryService.getQueryableStore(WORD_COUNT_STORE, QueryableStoreTypes.<String, Long>keyValueStore());
+        when(interactiveQueryService.getQueryableStore(eq(WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(null);
 
-        Long oneCount = getWordCount(wordCountStore, "one");
-        Long twoCount = getWordCount(wordCountStore, "two");
-        Long threeCount = getWordCount(wordCountStore, "three");
-
-        textInput.send(new GenericMessage<>(new TextEvent("one")));
-        sleep(Duration.ofSeconds(30));
-
-        verifyEvents("wordCount", events -> assertThat(events, contains(
-                "{\"word\":\"one\",\"count\":" + (oneCount + 1) + "}"
-        )));
-
-        verifyEvents("windowedWordCount", events -> assertThat(events, contains(
-                "{\"word\":\"one\",\"count\":1}"
-        )));
-
-        textInput.send(new GenericMessage<>(new TextEvent("one two")));
-        textInput.send(new GenericMessage<>(new TextEvent("one two three")));
-        sleep(Duration.ofSeconds(30));
-
-        verifyEvents("wordCount", events -> assertThat(events, contains(
-                "{\"word\":\"one\",\"count\":" + (oneCount + 3) + "}",
-                "{\"word\":\"two\",\"count\":" + (twoCount + 2) + "}",
-                "{\"word\":\"three\",\"count\":" + (threeCount + 1) + "}"
-        )));
-
-        verifyEvents("windowedWordCount", events -> assertThat(events, contains(
-                "{\"word\":\"one\",\"count\":2}",
-                "{\"word\":\"two\",\"count\":2}",
-                "{\"word\":\"three\",\"count\":1}"
-        )));
+        assertThrows(NoStoreException.class, wordCountProcessor::wordCount);
     }
 
-    @Import({WordCountProcessorConfiguration.class, KafkaNullConfiguration.class})
-    @EnableBinding({ WordCountProcessorBinding.class, TestBinding.class})
-    @EntityScan(basePackageClasses = WordCountProcessor.class)
-    public static class TestConfiguration extends AbstractKafkaTest.TestConfiguration {
+    @Test
+    @DisplayName("Given empty store then wordcount query for all words returns empty list")
+    void givenEmptyStoreThenWordCountQueryForAllWordsReturnsEmptyList() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(readOnlyKeyValueStore);
+        when(readOnlyKeyValueStore.approximateNumEntries()).thenReturn(0L);
+        when(readOnlyKeyValueStore.all()).thenReturn(new DummyKeyValueIterator<>());
+
+        List<WordCount> wordCounts = wordCountProcessor.wordCount();
+
+        assertThat(wordCounts, empty());
     }
 
-    public interface TestBinding {
-        @Output("test-text-input")
-        MessageChannel textInput();
+    @Test
+    @DisplayName("Given word counts in store then wordcount query for all words returns list of word counts")
+    void givenWordCountsInStoreThenWordCountQueryForAllWordsReturnsListOfWordCounts() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(readOnlyKeyValueStore);
+        when(readOnlyKeyValueStore.approximateNumEntries()).thenReturn(3L);
+        when(readOnlyKeyValueStore.all()).thenReturn(
+                new DummyKeyValueIterator<>(
+                        new KeyValue<>("one", 1L),
+                        new KeyValue<>("two", 2L),
+                        new KeyValue<>("three", 3L)
+                ));
+
+        List<WordCount> wordCounts = wordCountProcessor.wordCount();
+
+        assertThat(wordCounts,
+                contains(
+                        new WordCount("one", 1L),
+                        new WordCount("two", 2L),
+                        new WordCount("three", 3L)
+                ));
     }
 
-    private Long getWordCount(ReadOnlyKeyValueStore<String, Long> store, String word) {
-        Long count = store.get(word);
-        return count == null ? 0 : count;
+    @Test
+    @DisplayName("Given no store then wordcount query for a particular word throws NoStoreException")
+    void givenNoStoreThenWordCountQueryForAParticularWordThrowsNoStoreException() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(null);
+
+        assertThrows(NoStoreException.class, () -> wordCountProcessor.wordCount("one"));
+    }
+
+    @Test
+    @DisplayName("Given word in store then wordcount query for a particular word returns count for the word")
+    void givenWordInStoreThenWordCountQueryForAParticularWordReturnsWordCountForTheWord() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(readOnlyKeyValueStore);
+        when(readOnlyKeyValueStore.get("one")).thenReturn(1L);
+
+        WordCount wordCount = wordCountProcessor.wordCount("one");
+
+        assertThat(wordCount, is(new WordCount("one", 1L)));
+    }
+
+    @Test
+    @DisplayName("Given word not in store then wordcount query for a particular word returns zero count for the word")
+    void givenWordNotInStoreThenWordCountQueryForAParticularWordReturnsZeroWordCountForTheWord() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(readOnlyKeyValueStore);
+        when(readOnlyKeyValueStore.get("one")).thenReturn(null);
+
+        WordCount wordCount = wordCountProcessor.wordCount("one");
+
+        assertThat(wordCount, is(new WordCount("one", 0L)));
+    }
+
+    @Test
+    @DisplayName("Given word in store then wordcount query for a particular word with different case returns count for the word")
+    void givenWordInStoreThenWordCountQueryForAParticularWordWithDifferentCaseReturnsWordCountForTheWord() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(readOnlyKeyValueStore);
+        when(readOnlyKeyValueStore.get("one")).thenReturn(1L);
+
+        WordCount wordCount = wordCountProcessor.wordCount("ONE");
+
+        assertThat(wordCount, is(new WordCount("one", 1L)));
+    }
+
+    @Test
+    @DisplayName("Given no store then windowedwordcount query for all words throws NoStoreException")
+    void givenNoStoreThenWindowedWordCountQueryForAllWordsThrowsNoStoreException() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WINDOWED_WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(null);
+
+        assertThrows(NoStoreException.class, wordCountProcessor::windowedWordCount);
+    }
+
+    @Test
+    @DisplayName("Given empty store for time period then windowedwordcount query for all words returns empty list")
+    void givenEmptyStoreThenWindowedWordCountQueryForAllWordsReturnsEmptyList() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WINDOWED_WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(readOnlyWindowStore);
+        when(readOnlyWindowStore.fetchAll(any(), any())).thenReturn(new DummyKeyValueIterator<>());
+
+        List<WordCount> wordCounts = wordCountProcessor.windowedWordCount();
+
+        assertThat(wordCounts, empty());
+    }
+
+    @Test
+    @DisplayName("Given word counts in store for time period then windowedwordcount query for all words returns list of word counts")
+    void givenWordCountsInStoreThenWindowedWordCountQueryForAllWordsReturnsListOfWordCounts() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WINDOWED_WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(readOnlyWindowStore);
+        when(readOnlyWindowStore.fetchAll(any(), any())).thenReturn(
+                new DummyKeyValueIterator<>(
+                        new KeyValue<>(new Windowed<>("one", TIME_WINDOW), 1L),
+                        new KeyValue<>(new Windowed<>("two", TIME_WINDOW), 2L),
+                        new KeyValue<>(new Windowed<>("three", TIME_WINDOW), 3L)
+                ));
+
+        List<WordCount> wordCounts = wordCountProcessor.windowedWordCount();
+
+        assertThat(wordCounts,
+                contains(
+                        new WordCount("one", 1L),
+                        new WordCount("two", 2L),
+                        new WordCount("three", 3L)
+                ));
+    }
+
+    @Test
+    @DisplayName("Given no store then windowedwordcount query for a particular word throws NoStoreException")
+    void givenNoStoreThenWindowedWordCountQueryForAParticularWordThrowsNoStoreException() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WINDOWED_WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(null);
+
+        assertThrows(NoStoreException.class, () -> wordCountProcessor.windowedWordCount("one"));
+    }
+
+    @Test
+    @DisplayName("Given word in store for time period then windowedwordcount query for a particular word returns count for the word")
+    void givenWordInStoreThenWindowedWordCountQueryForAParticularWordReturnsWordCountForTheWord() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WINDOWED_WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(readOnlyWindowStore);
+        when(readOnlyWindowStore.fetch("one", WINDOW_DURATION_SECS)).thenReturn(1L);
+
+        WordCount wordCount = wordCountProcessor.windowedWordCount("one");
+
+        assertThat(wordCount, is(new WordCount("one", 1L)));
+    }
+
+    @Test
+    @DisplayName("Given word not in store for time period then windowedwordcount query for a particular word returns zero count for the word")
+    void givenWordNotInStoreThenWindowedWordCountQueryForAParticularWordReturnsZeroWordCountForTheWord() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WINDOWED_WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(readOnlyWindowStore);
+        when(readOnlyWindowStore.fetch("one", WINDOW_DURATION_SECS)).thenReturn(null);
+
+        WordCount wordCount = wordCountProcessor.windowedWordCount("one");
+
+        assertThat(wordCount, is(new WordCount("one", 0L)));
+    }
+
+    @Test
+    @DisplayName("Given word in store for time period then windowedwordcount query for a particular word with different case returns count for the word")
+    void givenWordInStoreThenWindowedWordCountQueryForAParticularWordWithDifferentCaseReturnsWordCountForTheWord() {
+
+        when(interactiveQueryService.getQueryableStore(eq(WINDOWED_WORD_COUNT_STORE), any(QueryableStoreType.class))).thenReturn(readOnlyWindowStore);
+        when(readOnlyWindowStore.fetch("one", WINDOW_DURATION_SECS)).thenReturn(null);
+
+        WordCount wordCount = wordCountProcessor.windowedWordCount("ONE");
+
+        assertThat(wordCount, is(new WordCount("one", 0L)));
+    }
+
+
+    private class DummyKeyValueIterator<K, V> implements KeyValueIterator<K, V> {
+
+        private KeyValue<K, V>[] keyValues;
+        int idx = 0;
+
+        DummyKeyValueIterator(KeyValue<K, V>... keyValues) {
+            this.keyValues = keyValues;
+        }
+
+        @Override
+        public void close() {
+
+        }
+
+        @Override
+        public K peekNextKey() {
+            return keyValues[idx].key;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return idx < keyValues.length;
+        }
+
+        @Override
+        public KeyValue<K, V> next() {
+            return keyValues[idx++];
+        }
     }
 }
